@@ -3,3 +3,5 @@ audio-recorder-streamlit
 openai-whisper
 python-docx
 google-generativeai
+st-gsheets-connection
+pandas
