@@ -51,7 +51,7 @@ def transcribe_audio(audio_bytes):
 def summarize_text(text, api_key):
     try:
         genai.configure(api_key=api_key)
-        model_gemini = genai.GenerativeModel('gemini-1.5-flash') # Model nhanh và rẻ (free tier)
+        model_gemini = genai.GenerativeModel('gemini-2.5-flash') # Model nhanh và rẻ (free tier)
         
         prompt = f"""
         Bạn là một trợ lý thư ký chuyên nghiệp. Hãy thực hiện các việc sau với văn bản bên dưới:
