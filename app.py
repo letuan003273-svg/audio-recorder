@@ -79,7 +79,7 @@ def transcribe_audio(audio_bytes):
         if os.path.exists(temp_filename): os.remove(temp_filename)
 
 def summarize_text(text):
-    model_gemini = genai.GenerativeModel('gemini-1.5-flash')
+    model_gemini = genai.GenerativeModel('gemini-2.5-flash')
     prompt = f"Tóm tắt và liệt kê hành động: '{text}'"
     return model_gemini.generate_content(prompt).text
 
