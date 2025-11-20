@@ -129,7 +129,7 @@ def create_docx(original, summary):
 
 # --- GIAO DIỆN CHÍNH ---
 
-st.title("🎙️ AI Ghi Chú")
+st.title("🎙️ AI Ghi Chú Bằng Giọng Nói")
 
 # Hộp ghi âm (Custom HTML Wrapper)
 st.markdown('<div class="recording-container">', unsafe_allow_html=True)
