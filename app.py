@@ -108,7 +108,7 @@ def transcribe_audio(audio_bytes):
 
 def summarize_text(text):
     try:
-        model_gemini = genai.GenerativeModel('gemini-1.5-flash')
+        model_gemini = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"Sửa lỗi chính tả, tóm tắt ý chính và liệt kê hành động từ văn bản sau: '{text}'"
         response = model_gemini.generate_content(prompt)
         return response.text
