@@ -6,88 +6,63 @@ import os
 import io
 from docx import Document
 import google.generativeai as genai
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+from datetime import datetime
 
 # 1. Cấu hình trang
-st.set_page_config(page_title="AI Note Mobile", page_icon="🎙️", layout="centered") # Đổi layout thành centered để đẹp hơn trên mobile
+st.set_page_config(page_title="AI Note Pro", page_icon="🔐", layout="centered")
 
-# --- PHẦN CSS TÙY CHỈNH (RESPONSIVE) ---
+# --- CSS ---
 st.markdown("""
     <style>
-        /* Import Font */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
-
-        html, body, [class*="css"] {
-            font-family: 'Inter', sans-serif;
-        }
-
-        /* Style cho hộp ghi âm */
+        html, body, [class*="css"] {font-family: 'Inter', sans-serif;}
         .recording-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            background-color: #f0f2f6;
-            border-radius: 20px;
-            padding: 20px;
-            margin-top: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-            border: 2px solid #e0e0e0;
-        }
-
-        /* Nhãn hướng dẫn trạng thái */
-        .status-label {
-            font-weight: bold;
-            margin-bottom: 10px;
-            color: #555;
-            font-size: 1.1rem;
-        }
-
-        .instruction-text {
-            font-size: 0.9rem;
-            color: #888;
-            margin-top: 5px;
-            text-align: center;
-        }
-
-        /* --- MOBILE RESPONSIVE --- */
-        /* Khi màn hình nhỏ hơn 600px (Điện thoại) */
-        @media only screen and (max-width: 600px) {
-            h1 {
-                font-size: 1.8rem !important; /* Tiêu đề nhỏ lại */
-            }
-            .stButton > button {
-                width: 100%; /* Nút bấm full màn hình */
-                padding: 15px;
-            }
-            .recording-container {
-                padding: 10px; /* Giảm padding để tiết kiệm chỗ */
-            }
-            /* Ẩn sidebar mặc định trên mobile để gọn (Streamlit tự làm, nhưng ta chỉnh padding) */
-            .block-container {
-                padding-top: 2rem;
-                padding-left: 1rem;
-                padding-right: 1rem;
-            }
+            border: 2px dashed #e0e0e0; border-radius: 20px; padding: 20px;
+            text-align: center; background-color: #f9f9f9; margin: 20px 0;
         }
     </style>
 """, unsafe_allow_html=True)
-# --------------------------
 
-# 2. Xử lý API Key
-api_key = None
-if "GOOGLE_API_KEY" in st.secrets:
-    api_key = st.secrets["GOOGLE_API_KEY"]
-    genai.configure(api_key=api_key)
-else:
-    st.error("⚠️ Vui lòng cấu hình GOOGLE_API_KEY trong Secrets.")
+# --- CHỨC NĂNG ĐĂNG NHẬP ---
+def check_password():
+    """Trả về True nếu đăng nhập thành công"""
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+
+    if st.session_state.password_correct:
+        return True
+
+    st.title("🔒 Đăng nhập")
+    pwd = st.text_input("Nhập mật khẩu truy cập:", type="password")
+    
+    if st.button("Đăng nhập"):
+        # So sánh với mật khẩu trong secrets
+        if pwd == st.secrets["APP_PASSWORD"]:
+            st.session_state.password_correct = True
+            st.rerun()
+        else:
+            st.error("Sai mật khẩu!")
+    return False
+
+# Nếu chưa đăng nhập thì dừng chương trình tại đây
+if not check_password():
     st.stop()
 
-# 3. Session State
-if 'notes' not in st.session_state:
-    st.session_state.notes = []
+# --- SAU KHI ĐĂNG NHẬP THÀNH CÔNG ---
 
-# 4. Hàm chức năng (Giữ nguyên)
+# 2. Kết nối Database (Google Sheets)
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# 3. Cấu hình API
+if "GOOGLE_API_KEY" in st.secrets:
+    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+else:
+    st.error("Thiếu API Key")
+    st.stop()
+
+# 4. Các hàm xử lý (Whisper, Gemini, Docx)
 @st.cache_resource
 def load_whisper_model():
     return whisper.load_model("base")
@@ -99,111 +74,102 @@ def transcribe_audio(audio_bytes):
         temp_audio.write(audio_bytes)
         temp_filename = temp_audio.name
     try:
-        result = model.transcribe(temp_filename, language="vi")
-        return result["text"]
-    except Exception as e:
-        return f"Lỗi: {e}"
+        return model.transcribe(temp_filename, language="vi")["text"]
     finally:
         if os.path.exists(temp_filename): os.remove(temp_filename)
 
 def summarize_text(text):
-    try:
-        model_gemini = genai.GenerativeModel('gemini-2.5-flash')
-        prompt = f"Sửa lỗi chính tả, tóm tắt ý chính và liệt kê hành động từ văn bản sau: '{text}'"
-        response = model_gemini.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return str(e)
+    model_gemini = genai.GenerativeModel('gemini-1.5-flash')
+    prompt = f"Tóm tắt và liệt kê hành động: '{text}'"
+    return model_gemini.generate_content(prompt).text
 
 def create_docx(original, summary):
     doc = Document()
-    doc.add_heading('Biên bản AI', 0)
-    doc.add_heading('Tóm tắt', 1)
     doc.add_paragraph(summary)
-    doc.add_heading('Chi tiết', 1)
     doc.add_paragraph(original)
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
     return buffer
 
+# Hàm lưu vào Google Sheets
+def save_to_drive(summary, original):
+    try:
+        # Lấy dữ liệu hiện tại
+        existing_data = conn.read(worksheet="Sheet1", usecols=[0, 1, 2], ttl=0)
+        
+        # Tạo dòng dữ liệu mới
+        new_row = pd.DataFrame([{
+            "Thời gian": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Tóm tắt": summary,
+            "Chi tiết": original
+        }])
+        
+        # Gộp dữ liệu cũ và mới
+        updated_data = pd.concat([existing_data, new_row], ignore_index=True)
+        
+        # Cập nhật lên Google Sheet
+        conn.update(worksheet="Sheet1", data=updated_data)
+        st.toast("✅ Đã lưu vào Google Sheets thành công!", icon="☁️")
+        
+    except Exception as e:
+        st.error(f"Lỗi lưu Database: {e}")
+
 # --- GIAO DIỆN CHÍNH ---
+st.title("🎙️ AI Voice Notes (Cloud Sync)")
+st.caption(f"Xin chào, bạn đã đăng nhập thành công!")
 
-st.title("🎙️ AI Ghi Chú")
-
-# Hộp ghi âm (Custom HTML Wrapper)
+# Khu vực ghi âm
 st.markdown('<div class="recording-container">', unsafe_allow_html=True)
+st.write("Bấm vào micro để bắt đầu")
+audio_bytes = audio_recorder(text="", recording_color="#ff2b2b", neutral_color="#333", icon_size="4x", pause_threshold=10.0)
+st.markdown('</div>', unsafe_allow_html=True)
 
-# Hiển thị trạng thái bằng màu sắc icon
-# Lưu ý: Streamlit chạy lại code từ đầu khi có tương tác.
-# audio_recorder tự quản lý trạng thái JS của nó.
-st.markdown('<div class="status-label">Trạng thái Micro</div>', unsafe_allow_html=True)
-
-# Component Ghi âm
-# pause_threshold=10.0: Chỉ dừng nếu im lặng quá 10 giây (giúp tránh dừng đột ngột)
-audio_bytes = audio_recorder(
-    text="", # Không dùng text mặc định của thư viện để ta tự custom label
-    recording_color="#ff2b2b", # Màu đỏ tươi khi đang ghi
-    neutral_color="#3d3d3d",   # Màu đen xám khi chờ
-    icon_name="microphone",
-    icon_size="4x",            # Icon to dễ bấm trên điện thoại
-    pause_threshold=10.0       # Tăng ngưỡng im lặng để không tự tắt
-)
-
-# Hướng dẫn dưới nút
-st.markdown("""
-    <div class="instruction-text">
-    ⚫ Màu đen: Nhấn để BẮT ĐẦU<br>
-    🔴 Màu đỏ: Đang ghi (Nhấn lại để DỪNG)
-    </div>
-    </div>
-""", unsafe_allow_html=True)
-
-
-# Xử lý kết quả
 if audio_bytes:
     st.audio(audio_bytes, format="audio/wav")
     
-    with st.status("⏳ Đang xử lý âm thanh...", expanded=True) as status:
-        st.write("Whisper: Đang gỡ băng...")
+    with st.status("Đang xử lý dữ liệu...", expanded=True):
+        st.write("Whisper: Gỡ băng...")
         transcript = transcribe_audio(audio_bytes)
-        
-        st.write("Gemini: Đang tóm tắt...")
+        st.write("Gemini: Tóm tắt...")
         summary = summarize_text(transcript)
         
-        status.update(label="✅ Xử lý hoàn tất!", state="complete", expanded=False)
+        # Tự động lưu vào Database
+        st.write("Cloud: Đang đồng bộ Google Sheets...")
+        save_to_drive(summary, transcript)
 
-    # Hiển thị kết quả (Dùng Tabs cho gọn trên mobile)
-    st.divider()
-    tab1, tab2 = st.tabs(["📝 Tóm tắt", "📄 Chi tiết"])
-    
-    with tab1:
+    # Hiển thị
+    col1, col2 = st.columns(2)
+    with col1:
         st.info(summary)
-    
-    with tab2:
+    with col2:
         st.write(transcript)
-
-    # Nút tải về
-    st.markdown("<br>", unsafe_allow_html=True)
+        
     docx = create_docx(transcript, summary)
-    st.download_button(
-        label="📥 Tải Word (.docx)",
-        data=docx,
-        file_name="SmartNote_Mobile.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        use_container_width=True # Quan trọng: Nút rộng full trên mobile
-    )
+    st.download_button("📥 Tải Word", docx, "Note.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
 
-    # Lưu lịch sử
-    note_data = {"original": transcript, "summary": summary}
-    if not st.session_state.notes or st.session_state.notes[-1]["original"] != transcript:
-        st.session_state.notes.append(note_data)
+# --- HIỂN THỊ LỊCH SỬ TỪ DATABASE ---
+st.divider()
+st.subheader("🗄️ Dữ liệu trên Cloud (Google Sheets)")
 
-# Lịch sử (Rút gọn)
-if st.session_state.notes:
-    st.divider()
-    st.caption(f"Lịch sử ({len(st.session_state.notes)} bản ghi)")
-    with st.expander("Xem lại các ghi chú cũ"):
-        for i, note in enumerate(reversed(st.session_state.notes)):
-             st.markdown(f"**#{len(st.session_state.notes)-i}** - {note['summary'][:80]}...")
-             st.markdown("---")
+# Nút làm mới dữ liệu
+if st.button("🔄 Tải lại danh sách"):
+    st.cache_data.clear()
+    st.rerun()
+
+try:
+    # Đọc dữ liệu từ Google Sheets (ttl=5: cache trong 5 giây)
+    df = conn.read(worksheet="Sheet1", usecols=[0, 1, 2], ttl=5)
+    
+    if not df.empty:
+        # Sắp xếp mới nhất lên đầu
+        df = df.sort_values(by="Thời gian", ascending=False)
+        
+        for index, row in df.iterrows():
+            with st.expander(f"{row['Thời gian']} - {str(row['Tóm tắt'])[:50]}..."):
+                st.write(f"**Tóm tắt:** {row['Tóm tắt']}")
+                st.write(f"**Chi tiết:** {row['Chi tiết']}")
+    else:
+        st.info("Chưa có dữ liệu nào trên Cloud.")
+except Exception as e:
+    st.warning("Chưa kết nối được Database hoặc bảng trống.")
