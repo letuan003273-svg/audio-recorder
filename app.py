@@ -1,71 +1,83 @@
 import streamlit as st
-import speech_recognition as sr
 from audio_recorder_streamlit import audio_recorder
-import io
+import whisper
+import tempfile
+import os
 
 # 1. Cấu hình trang
-st.set_page_config(page_title="Ghi Chú Giọng Nói", page_icon="🎙️")
+st.set_page_config(page_title="Whisper Note", page_icon="🧠")
+st.title("🧠 Ghi Chú Thông Minh với OpenAI Whisper")
 
-st.title("🎙️ Ứng dụng Ghi Chú Bằng Giọng Nói")
-st.write("Nhấn vào micro bên dưới để bắt đầu ghi âm, sau đó chờ hệ thống chuyển đổi thành văn bản.")
-
-# 2. Khởi tạo danh sách ghi chú trong bộ nhớ tạm (Session State)
+# 2. Khởi tạo Session State
 if 'notes' not in st.session_state:
     st.session_state.notes = []
 
-# 3. Hàm xử lý chuyển đổi âm thanh thành văn bản
-def transcribe_audio(audio_bytes):
-    # Khởi tạo bộ nhận diện
-    r = sr.Recognizer()
-    
-    # Chuyển đổi bytes thành dữ liệu âm thanh mà thư viện hiểu được
-    audio_data = io.BytesIO(audio_bytes)
-    
-    try:
-        with sr.AudioFile(audio_data) as source:
-            audio = r.record(source)  # Đọc toàn bộ file âm thanh
-            # Sử dụng Google Speech Recognition (cần kết nối internet)
-            text = r.recognize_google(audio, language="vi-VN") 
-            return text
-    except sr.UnknownValueError:
-        return "Không thể nghe rõ âm thanh."
-    except sr.RequestError:
-        return "Lỗi kết nối đến dịch vụ Google."
-    except Exception as e:
-        return f"Đã xảy ra lỗi: {e}"
+# 3. Tải mô hình Whisper (QUAN TRỌNG: Dùng Cache)
+# Chúng ta dùng @st.cache_resource để chỉ tải mô hình 1 lần duy nhất
+# giúp ứng dụng không bị chậm khi tải lại trang.
+@st.cache_resource
+def load_whisper_model():
+    # "base" là mô hình cân bằng giữa tốc độ và độ chính xác.
+    # Bạn có thể đổi thành "tiny" (nhanh hơn, kém hơn) hoặc "small" (chậm hơn, tốt hơn)
+    model = whisper.load_model("base")
+    return model
 
-# 4. Giao diện ghi âm
-# Nút ghi âm sẽ trả về dữ liệu bytes khi người dùng dừng ghi
+# Hiển thị thông báo đang tải model (chỉ hiện lần đầu)
+with st.spinner("Đang tải mô hình AI... Vui lòng đợi giây lát"):
+    model = load_whisper_model()
+
+# 4. Hàm xử lý âm thanh với Whisper
+def transcribe_audio(audio_bytes):
+    # Whisper cần đọc từ file, không đọc trực tiếp từ bytes được
+    # Nên ta tạo một file tạm thời
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+        temp_audio.write(audio_bytes)
+        temp_filename = temp_audio.name
+
+    try:
+        # Gọi mô hình để nhận diện
+        result = model.transcribe(temp_filename, language="vi")
+        return result["text"]
+    except Exception as e:
+        return f"Lỗi: {e}"
+    finally:
+        # Dọn dẹp: Xóa file tạm sau khi dùng xong
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+
+# 5. Giao diện ghi âm
+st.write("Nhấn micro để ghi âm (Mô hình Base có thể mất vài giây để xử lý).")
 audio_bytes = audio_recorder(
     text="",
-    recording_color="#e8b62c",
-    neutral_color="#6aa36f",
+    recording_color="#ff4b4b",
+    neutral_color="#333333",
     icon_name="microphone",
     icon_size="2x",
 )
 
-# 5. Xử lý khi có dữ liệu âm thanh
+# 6. Xử lý logic khi có âm thanh
 if audio_bytes:
-    # Hiển thị thanh phát lại âm thanh vừa ghi
     st.audio(audio_bytes, format="audio/wav")
     
-    with st.spinner("Đang chuyển đổi giọng nói thành văn bản..."):
-        # Gọi hàm chuyển đổi
+    with st.spinner("AI đang nghe và phân tích..."):
         transcript = transcribe_audio(audio_bytes)
         
         if transcript:
-            st.success("Đã chuyển đổi thành công!")
-            st.subheader("📝 Nội dung ghi chú:")
+            st.success("Hoàn tất!")
+            st.subheader("📝 Nội dung:")
             st.info(transcript)
             
-            # Thêm vào danh sách lịch sử
-            st.session_state.notes.append(transcript)
+            # Lưu vào lịch sử (tránh lưu trùng lặp nếu app reload)
+            if not st.session_state.notes or st.session_state.notes[-1] != transcript:
+                st.session_state.notes.append(transcript)
 
-# 6. Hiển thị lịch sử ghi chú
+# 7. Hiển thị lịch sử
 st.divider()
 st.header("Lịch sử Ghi chú")
 if st.session_state.notes:
     for i, note in enumerate(reversed(st.session_state.notes)):
-        st.text_area(f"Ghi chú {len(st.session_state.notes) - i}", note, height=70)
+        st.markdown(f"**Ghi chú {len(st.session_state.notes) - i}:**")
+        st.write(note)
+        st.markdown("---")
 else:
-    st.write("Chưa có ghi chú nào.")
+    st.caption("Chưa có ghi chú nào.")
