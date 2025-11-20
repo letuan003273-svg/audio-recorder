@@ -8,72 +8,73 @@ from docx import Document
 import google.generativeai as genai
 
 # 1. Cấu hình trang
-st.set_page_config(page_title="AI Smart Note", page_icon="🎙️", layout="wide")
+st.set_page_config(page_title="AI Note Mobile", page_icon="🎙️", layout="centered") # Đổi layout thành centered để đẹp hơn trên mobile
 
-# --- PHẦN CSS TÙY CHỈNH ---
+# --- PHẦN CSS TÙY CHỈNH (RESPONSIVE) ---
 st.markdown("""
     <style>
-        /* Nhập Google Fonts */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Grotesk:wght@700&display=swap');
+        /* Import Font */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
 
-        /* Áp dụng font cho toàn bộ ứng dụng */
         html, body, [class*="css"] {
             font-family: 'Inter', sans-serif;
         }
 
-        /* Tùy chỉnh Tiêu đề (H1) */
-        h1 {
-            font-family: 'Space Grotesk', sans-serif;
-            text-align: center;
-            background: -webkit-linear-gradient(45deg, #FF4B4B, #FF914D);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            font-size: 3.5rem !important;
-            padding-bottom: 20px;
-        }
-
-        /* Tùy chỉnh Tiêu đề phụ (H2, H3) */
-        h2, h3 {
-            font-family: 'Space Grotesk', sans-serif;
-            color: #333;
-        }
-
-        /* Khu vực ghi âm (Recording Box) */
-        .recording-box {
-            background-color: #f8f9fa; /* Màu nền xám nhẹ */
-            border: 2px dashed #d1d5db; /* Viền nét đứt */
+        /* Style cho hộp ghi âm */
+        .recording-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #f0f2f6;
             border-radius: 20px;
-            padding: 30px;
-            text-align: center;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        }
-        
-        /* Làm đẹp nút tải xuống (stButton) */
-        .stButton > button {
-            width: 100%;
-            border-radius: 10px;
-            font-weight: 600;
-            padding: 0.5rem 1rem;
-            border: none;
-            transition: all 0.3s ease;
-        }
-        
-        /* Hiệu ứng khi di chuột vào nút */
-        .stButton > button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-top: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border: 2px solid #e0e0e0;
         }
 
-        /* Căn giữa các thông báo st.info, st.success */
-        .stAlert {
-            border-radius: 10px;
+        /* Nhãn hướng dẫn trạng thái */
+        .status-label {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #555;
+            font-size: 1.1rem;
+        }
+
+        .instruction-text {
+            font-size: 0.9rem;
+            color: #888;
+            margin-top: 5px;
+            text-align: center;
+        }
+
+        /* --- MOBILE RESPONSIVE --- */
+        /* Khi màn hình nhỏ hơn 600px (Điện thoại) */
+        @media only screen and (max-width: 600px) {
+            h1 {
+                font-size: 1.8rem !important; /* Tiêu đề nhỏ lại */
+            }
+            .stButton > button {
+                width: 100%; /* Nút bấm full màn hình */
+                padding: 15px;
+            }
+            .recording-container {
+                padding: 10px; /* Giảm padding để tiết kiệm chỗ */
+            }
+            /* Ẩn sidebar mặc định trên mobile để gọn (Streamlit tự làm, nhưng ta chỉnh padding) */
+            .block-container {
+                padding-top: 2rem;
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
         }
     </style>
 """, unsafe_allow_html=True)
 # --------------------------
 
-# 2. Xử lý API Key từ Secrets
+# 2. Xử lý API Key
 api_key = None
 if "GOOGLE_API_KEY" in st.secrets:
     api_key = st.secrets["GOOGLE_API_KEY"]
@@ -82,23 +83,17 @@ else:
     st.error("⚠️ Vui lòng cấu hình GOOGLE_API_KEY trong Secrets.")
     st.stop()
 
-# 3. Khởi tạo Session State
+# 3. Session State
 if 'notes' not in st.session_state:
     st.session_state.notes = []
 
-# 4. Tải Whisper
+# 4. Hàm chức năng (Giữ nguyên)
 @st.cache_resource
 def load_whisper_model():
     return whisper.load_model("base")
 
-# Hiển thị tiêu đề
-st.title("🎙️ AI Smart Note")
-st.markdown("<p style='text-align: center; color: #666; margin-top: -20px; margin-bottom: 40px;'>Biến giọng nói thành văn bản và tóm tắt thông minh</p>", unsafe_allow_html=True)
-
-# Tải model (ẩn spinner để giao diện đẹp hơn, chỉ hiện khi cần)
 model = load_whisper_model()
 
-# --- LOGIC XỬ LÝ ---
 def transcribe_audio(audio_bytes):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
         temp_audio.write(audio_bytes)
@@ -134,78 +129,81 @@ def create_docx(original, summary):
 
 # --- GIAO DIỆN CHÍNH ---
 
-# Tạo bố cục 3 cột để căn giữa nút ghi âm
-col1, col2, col3 = st.columns([1, 2, 1])
+st.title("🎙️ AI Ghi Chú")
 
-with col2:
-    # Tạo container giả lập hiệu ứng thẻ bài (Card)
-    st.markdown('<div class="recording-box">', unsafe_allow_html=True)
-    st.write("👇 **Nhấn vào icon bên dưới để bắt đầu**")
-    
-    # Nút ghi âm
-    audio_bytes = audio_recorder(
-        text="",
-        recording_color="#ff4b4b", # Màu đỏ khi ghi
-        neutral_color="#FF914D",   # Màu cam khi chờ
-        icon_name="microphone",
-        icon_size="4x",            # Icon lớn hơn
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
+# Hộp ghi âm (Custom HTML Wrapper)
+st.markdown('<div class="recording-container">', unsafe_allow_html=True)
 
-# Xử lý khi có âm thanh
+# Hiển thị trạng thái bằng màu sắc icon
+# Lưu ý: Streamlit chạy lại code từ đầu khi có tương tác.
+# audio_recorder tự quản lý trạng thái JS của nó.
+st.markdown('<div class="status-label">Trạng thái Micro</div>', unsafe_allow_html=True)
+
+# Component Ghi âm
+# pause_threshold=10.0: Chỉ dừng nếu im lặng quá 10 giây (giúp tránh dừng đột ngột)
+audio_bytes = audio_recorder(
+    text="", # Không dùng text mặc định của thư viện để ta tự custom label
+    recording_color="#ff2b2b", # Màu đỏ tươi khi đang ghi
+    neutral_color="#3d3d3d",   # Màu đen xám khi chờ
+    icon_name="microphone",
+    icon_size="4x",            # Icon to dễ bấm trên điện thoại
+    pause_threshold=10.0       # Tăng ngưỡng im lặng để không tự tắt
+)
+
+# Hướng dẫn dưới nút
+st.markdown("""
+    <div class="instruction-text">
+    ⚫ Màu đen: Nhấn để BẮT ĐẦU<br>
+    🔴 Màu đỏ: Đang ghi (Nhấn lại để DỪNG)
+    </div>
+    </div>
+""", unsafe_allow_html=True)
+
+
+# Xử lý kết quả
 if audio_bytes:
-    # Hiển thị thanh phát lại nhỏ gọn ở giữa
-    col1_a, col2_a, col3_a = st.columns([1, 2, 1])
-    with col2_a:
-        st.audio(audio_bytes, format="audio/wav")
-
-    with st.status("🤖 AI đang làm việc...", expanded=True) as status:
-        st.write("👂 Đang nghe và gỡ băng (Whisper)...")
+    st.audio(audio_bytes, format="audio/wav")
+    
+    with st.status("⏳ Đang xử lý âm thanh...", expanded=True) as status:
+        st.write("Whisper: Đang gỡ băng...")
         transcript = transcribe_audio(audio_bytes)
         
-        st.write("🧠 Đang suy nghĩ và tóm tắt (Gemini)...")
+        st.write("Gemini: Đang tóm tắt...")
         summary = summarize_text(transcript)
         
-        status.update(label="✅ Hoàn tất!", state="complete", expanded=False)
+        status.update(label="✅ Xử lý hoàn tất!", state="complete", expanded=False)
 
-    # Hiển thị kết quả
-    if transcript and summary:
-        st.divider()
-        
-        # Layout kết quả
-        c1, c2 = st.columns(2)
-        
-        with c1:
-            st.markdown("### 📝 Tóm tắt & Hành động")
-            st.info(summary)
-        
-        with c2:
-            st.markdown("### 📄 Văn bản gốc")
-            with st.container(height=300): # Thanh cuộn cho văn bản dài
-                st.write(transcript)
-        
-        # Nút tải về nằm giữa
-        st.markdown("<br>", unsafe_allow_html=True)
-        col_d1, col_d2, col_d3 = st.columns([1, 1, 1])
-        with col_d2:
-            docx = create_docx(transcript, summary)
-            st.download_button(
-                label="📥 TẢI VỀ FILE WORD",
-                data=docx,
-                file_name="SmartNote_AI.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True # Nút rộng full container
-            )
+    # Hiển thị kết quả (Dùng Tabs cho gọn trên mobile)
+    st.divider()
+    tab1, tab2 = st.tabs(["📝 Tóm tắt", "📄 Chi tiết"])
+    
+    with tab1:
+        st.info(summary)
+    
+    with tab2:
+        st.write(transcript)
 
-        # Lưu lịch sử
-        note_data = {"original": transcript, "summary": summary}
-        if not st.session_state.notes or st.session_state.notes[-1]["original"] != transcript:
-            st.session_state.notes.append(note_data)
+    # Nút tải về
+    st.markdown("<br>", unsafe_allow_html=True)
+    docx = create_docx(transcript, summary)
+    st.download_button(
+        label="📥 Tải Word (.docx)",
+        data=docx,
+        file_name="SmartNote_Mobile.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        use_container_width=True # Quan trọng: Nút rộng full trên mobile
+    )
 
-# Lịch sử (Footer)
+    # Lưu lịch sử
+    note_data = {"original": transcript, "summary": summary}
+    if not st.session_state.notes or st.session_state.notes[-1]["original"] != transcript:
+        st.session_state.notes.append(note_data)
+
+# Lịch sử (Rút gọn)
 if st.session_state.notes:
     st.divider()
-    st.caption("Lịch sử phiên làm việc gần đây:")
-    for note in reversed(st.session_state.notes[-3:]): # Chỉ hiện 3 cái mới nhất
-        with st.expander(f"Note: {note['original'][:50]}..."):
-            st.write(note['summary'])
+    st.caption(f"Lịch sử ({len(st.session_state.notes)} bản ghi)")
+    with st.expander("Xem lại các ghi chú cũ"):
+        for i, note in enumerate(reversed(st.session_state.notes)):
+             st.markdown(f"**#{len(st.session_state.notes)-i}** - {note['summary'][:80]}...")
+             st.markdown("---")
